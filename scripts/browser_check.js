@@ -26,6 +26,7 @@ const ROOT = path.resolve(__dirname, "..");
 const APP = path.join(ROOT, "index.html");
 const requireBrowser = process.argv.includes("--require");
 const shotArg = (process.argv.find((a) => a.startsWith("--shot=")) || "").slice(7);
+const camShotArg = (process.argv.find((a) => a.startsWith("--cam-shot=")) || "").slice(11);
 
 let pass = 0;
 const failures = [];
@@ -131,10 +132,16 @@ async function main() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "ascii-forge-chrome-"));
   const port = 9300 + (process.pid % 400);
   const shot = shotArg ? path.resolve(ROOT, shotArg) : path.join(profile, "app.png");
+  const camShot = camShotArg ? path.resolve(ROOT, camShotArg) : null;
   const child = spawn(chrome, [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-background-networking", "--hide-scrollbars",
     "--force-device-scale-factor=1", "--window-size=1500,1150",
+    /* a synthetic camera lets the gate exercise capture with nobody in front of a lens.
+       --use-fake-ui-for-media-stream auto-accepts the permission prompt;
+       --auto-accept-camera-and-microphone-capture looks equivalent but makes Chrome
+       exit before it opens the debugging port, so it is deliberately absent. */
+    "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
     "--user-data-dir=" + profile, "--remote-debugging-port=" + port,
     "file:///" + APP.replace(/\\/g, "/"),
   ], { stdio: "ignore" });
@@ -173,7 +180,7 @@ async function main() {
 
     await waitFor(() => cdp.eval("document.readyState === 'complete' && typeof window.AsciiForge === 'object'"), 15000, "the app to boot");
 
-    await script(cdp, errors, shot);
+    await script(cdp, errors, shot, camShot);
   } catch (e) {
     bad("browser session", e.message);
   } finally {
@@ -186,7 +193,7 @@ async function main() {
 }
 
 /* ------------------------------------------------------------------ */
-function script(cdp, errors, shot) {
+function script(cdp, errors, shot, camShot) {
   return (async () => {
     section("App — loads and converts");
 
@@ -267,6 +274,46 @@ function script(cdp, errors, shot) {
     check("svg export uses per-run fill colours",
       (ex3.svg.match(/fill="#[0-9a-f]{6}"/g) || []).length > 10,
       (ex3.svg.match(/fill="#[0-9a-f]{6}"/g) || []).length + " coloured runs");
+
+    section("App — webcam capture");
+
+    await cdp.eval("document.getElementById('camBtn').click()");
+    await waitFor(() => cdp.eval("window.AsciiForge.cameraActive()"), 20000, "the camera stream");
+    const cam1 = JSON.parse(await cdp.eval("JSON.stringify(window.AsciiForge.dom())"));
+    check("the webcam button opens a live preview", cam1.camPanelHidden === false && cam1.cameraActive === true);
+    check("the entry-point button reports the live state instead of duplicating Stop",
+      /active/i.test(cam1.camButton), cam1.camButton);
+    await waitFor(async () => (await cdp.eval("document.getElementById('camVideo').videoWidth")) > 0, 15000, "frames from the camera");
+    const dims = JSON.parse(await cdp.eval("JSON.stringify([document.getElementById('camVideo').videoWidth, document.getElementById('camVideo').videoHeight])"));
+    check("frames are actually arriving on the video element", dims[0] > 0 && dims[1] > 0, dims.join("x"));
+
+    if (camShot) {
+      const r = await cdp.send("Page.captureScreenshot", { format: "png" });
+      fs.mkdirSync(path.dirname(camShot), { recursive: true });
+      fs.writeFileSync(camShot, Buffer.from(r.data, "base64"));
+      ok("captured the live camera panel", camShot);
+    }
+
+    await cdp.eval("document.getElementById('camShot').click()");
+    await waitFor(() => cdp.eval("window.AsciiForge.dom().imageName.indexOf('webcam-') === 0"), 20000, "the captured frame to load");
+    await waitFor(() => cdp.eval("!!window.AsciiForge.getOutput()"), 20000, "the captured frame to convert");
+    await sleep(300);
+    const cam2 = JSON.parse(await cdp.eval("JSON.stringify(window.AsciiForge.dom())"));
+    check("the captured frame converts like any other image",
+      /Done in \d+ ms/.test(cam2.status) && /^\d+ × \d+$/.test(cam2.grid), cam2.grid + " · " + cam2.imageName);
+    check("the camera is released after capture, so the indicator goes out",
+      cam2.cameraActive === false && cam2.camPanelHidden === true && cam2.camVideo.srcObject === false,
+      "tracks stopped, panel hidden, srcObject cleared");
+    check("the button reverts to its idle label", /use webcam/i.test(cam2.camButton), cam2.camButton);
+    check("the capture is named like a file the user picked",
+      (await cdp.eval("window.AsciiForge.buildExports().names.txt")).indexOf("webcam-") === 0,
+      await cdp.eval("window.AsciiForge.buildExports().names.txt"));
+    const camEx = JSON.parse(await cdp.eval("JSON.stringify(window.AsciiForge.buildExports())"));
+    check("a captured frame inherits the normal export path (no special casing)",
+      camEx.txt === cam2.text + "\n" && /^<\?xml/.test(camEx.svg) && /<svg[^>]*viewBox/.test(camEx.svg) &&
+      /<pre>/.test(camEx.html),
+      "preview and all four exports still agree for a webcam source");
+    check("no exceptions from the camera path", errors.length === 0, errors.slice(0, 2).join(" | "));
 
     section("App — responsive layout");
 

@@ -62,6 +62,9 @@ function staticChecks(html) {
   const externalRefs = [
     [/fetch\s*\(/, "fetch("],
     [/XMLHttpRequest/, "XMLHttpRequest"],
+    [/sendBeacon/, "sendBeacon"],
+    [/\bnew WebSocket\b/, "WebSocket"],
+    [/\bFormData\b/, "FormData"],
     [/importScripts/, "importScripts"],
     [/\bcdn\./i, "cdn."],
     [/unpkg\.com|jsdelivr|cdnjs|googleapis/i, "a CDN hostname"],
@@ -94,6 +97,27 @@ function staticChecks(html) {
 
   /* the built-in demo must not be a network asset */
   check("demo image is synthesised, not fetched", /function demoSource\(\)/.test(html) && /toDataURL/.test(html));
+
+  /* ---- webcam ---- */
+  check("a webcam button exists under Source and is wired up",
+    /id="camBtn"/.test(html) && /\$\("camBtn"\)\.addEventListener/.test(html),
+    "button present in the Source card");
+  check("the camera stream comes only from getUserMedia",
+    /navigator\.mediaDevices\.getUserMedia/.test(html) && /audio: false/.test(html),
+    "video only — the microphone is never requested");
+  check("captured frames are read through a canvas, never uploaded",
+    /drawImage\(v, 0, 0, w, h\)/.test(html) && /toDataURL\("image\/png"\)/.test(html) && !/enctype|multipart/.test(html));
+  check("the camera is released on every exit path",
+    /for \(const t of cam\.stream\.getTracks\(\)\) t\.stop\(\)/.test(html) &&
+    (html.match(/camStop\(/g) || []).length >= 4,
+    "stop on capture, on the stop button, on clear and on pagehide");
+  check("permission failures are handled by name",
+    /NotAllowedError/.test(html) && /NotFoundError/.test(html) && /NotReadableError/.test(html) &&
+    /isSecureContext/.test(html),
+    "denied / no camera / camera busy / insecure context");
+  check("the live preview is mirrored to match the capture",
+    /transform:scaleX\(-1\)/.test(html) && /x\.translate\(w, 0\); x\.scale\(-1, 1\)/.test(html),
+    "what you see is what gets captured");
 }
 
 /* ------------------------------------------------------------------ *

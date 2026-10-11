@@ -13,8 +13,10 @@ static. ASCII Forge has a tone pipeline built for exactly that, and it reports a
 
 ## What it does
 
-- **Drop, paste (`Ctrl`+`V`), or pick** an image — PNG, JPEG, WebP, GIF, BMP. Everything
-  happens locally; the file never leaves the machine.
+- **Drop, paste (`Ctrl`+`V`), pick a file, or capture a frame from your webcam** — PNG, JPEG,
+  WebP, GIF, BMP. Everything happens locally; nothing is uploaded, including camera frames
+  (the stream goes straight into a canvas, and the camera is released as soon as you
+  capture or stop, so the indicator light goes out).
 - **Auto-tuned on load** from the image's own histogram: black point, white point and
   gamma are derived per image, then normalised so the darkest character is genuinely
   blank and the brightest reaches the top of the ramp.
@@ -66,9 +68,9 @@ Two gates, both zero-dependency. The first is Node-only, the second drives real 
 over the DevTools Protocol (Node's built-in `fetch` and `WebSocket`, no puppeteer).
 
 ```
-node scripts/verify_app.js        # 74 assertions, no browser needed
-node scripts/browser_check.js     # 34 assertions in real Chrome
-node scripts/browser_check.js --shot=artifacts/app.png
+node scripts/verify_app.js        # 80 assertions, no browser needed
+node scripts/browser_check.js     # 43 assertions in real Chrome
+node scripts/browser_check.js --shot=artifacts/app.png --cam-shot=artifacts/camera.png
 CHROME_PATH=/path/to/chrome node scripts/browser_check.js
 ```
 
@@ -83,9 +85,18 @@ actually helping dim frames.
 `browser_check.js` loads the real app, drives it through the exposed `window.AsciiForge`
 hook, and checks what actually rendered: that the `.txt` export equals the preview, that
 colour-mode `textContent` still equals the raw grid, that the layout does not overflow at
-390 / 1024 / 1500 px, that a 3×3 white image does not wedge it, and that nothing throws.
+390 / 1024 / 1500 px, that a 3×3 white image does not wedge it, that a webcam frame is
+captured, converted and the camera released, and that nothing throws.
 If no browser is found it prints `SKIPPED` and exits 0; add `--require` in CI to make
 that a failure.
+
+The webcam path is gated for real: the browser check launches Chrome with
+`--use-fake-ui-for-media-stream --use-fake-device-for-media-stream`, so a synthetic camera
+supplies 1280×720 frames with nobody in front of a lens, and the gate asserts that capture
+produces a converted grid, that the stream is stopped afterwards, and that the button
+returns to its idle label. (`--auto-accept-camera-and-microphone-capture` looks like the
+right flag for this but makes Chrome exit before it opens the debugging port — leave it
+out.)
 
 ## Architecture
 

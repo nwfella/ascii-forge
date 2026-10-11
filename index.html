@@ -111,6 +111,19 @@ html[data-theme="light"] .artbox{background:#fff}
 .artbox.light #art{color:#0b0e13}
 .artbox.transparent #art{color:var(--fg)}
 
+/* ---------- webcam ---------- */
+#camPanel{margin-top:12px}
+.camlive{
+  position:relative; border:1px solid var(--line2); border-radius:8px; overflow:hidden;
+  background:#000; max-width:340px;
+}
+#camVideo{display:block; width:100%; height:auto; transform:scaleX(-1)}
+.camhint{
+  position:absolute; left:0; right:0; bottom:0; font:11.5px var(--mono); color:#dbe2ee;
+  background:color-mix(in srgb, #000 62%, transparent); padding:4px 7px; text-align:center;
+}
+#camPanel .btns{margin-top:10px; align-items:center}
+
 /* ---------- controls ---------- */
 .panel{display:flex; flex-direction:column; gap:clamp(12px,2vw,16px); position:relative}
 .sect{border-top:1px solid var(--line)}
@@ -158,6 +171,8 @@ button{
 }
 button:hover{border-color:var(--accent2); color:var(--accent)}
 button:active{transform:translateY(1px)}
+button:disabled{opacity:.55; cursor:default}
+button:disabled:hover{border-color:var(--line2); color:var(--fg)}
 button.primary{background:var(--accent2); border-color:var(--accent); color:#04140d; font-weight:600}
 button.primary:hover{background:var(--accent); color:#04140d}
 .btns{display:flex; flex-wrap:wrap; gap:7px}
@@ -219,13 +234,27 @@ footer code{font-family:var(--mono); color:var(--dim)}
       <div class="body">
         <div id="drop" role="button" tabindex="0" aria-label="Choose an image, or drop one here">
           <div class="big">Drop an image, paste from clipboard, or click to choose</div>
-          <div class="small">PNG · JPEG · WebP · GIF · BMP — <kbd>Ctrl</kbd>+<kbd>V</kbd> works anywhere on this page</div>
+          <div class="small">PNG · JPEG · WebP · GIF · BMP — or grab a frame from your webcam — <kbd>Ctrl</kbd>+<kbd>V</kbd> works anywhere on this page</div>
         </div>
         <input type="file" id="file" accept="image/*" class="sr">
         <div class="btns" style="margin-top:10px">
           <button id="demoBtn">Load demo image</button>
           <button id="pasteBtn">Paste from clipboard</button>
+          <button id="camBtn">Use webcam</button>
           <button id="clearBtn">Clear</button>
+        </div>
+
+        <div id="camPanel" hidden>
+          <div class="camlive">
+            <video id="camVideo" playsinline muted autoplay aria-label="Live camera preview"></video>
+            <div class="camhint" id="camHint">Starting camera…</div>
+          </div>
+          <div class="btns">
+            <button id="camShot" class="primary">Capture frame</button>
+            <button id="camStop">Stop camera</button>
+            <label class="sw" style="flex:0 0 auto"><input type="checkbox" id="camTimer"> 3s timer</label>
+          </div>
+          <div class="hint" style="padding-left:0">The stream is read straight into a canvas — no frame is uploaded anywhere. Stopping the camera releases the device, so the indicator light goes out.</div>
         </div>
       </div>
     </div>
@@ -1108,6 +1137,102 @@ const Core = (function () {
     return c.toDataURL("image/png");
   }
 
+  /* ---------------- webcam ----------------
+     The frame is drawn from the <video> straight into a canvas and handed to the
+     normal loader as a data URL, so a captured photo travels exactly the same path
+     as a dropped file. Nothing here touches the network. Tracks are stopped on
+     every exit path so the camera indicator light actually goes out. */
+  const cam = { stream: null, timer: 0 };
+
+  function camReady() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
+
+  async function camStart() {
+    if (cam.stream) return;
+    if (!camReady()) {
+      status("This browser exposes no camera API. Capture needs a secure context (https, localhost or file://).", "err");
+      return;
+    }
+    if (!window.isSecureContext) {
+      status("Webcam capture needs a secure context — open this over https or on localhost.", "err");
+      return;
+    }
+    status("Asking the browser for camera access…", "busy");
+    try {
+      cam.stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: false,
+      });
+    } catch (err) {
+      cam.stream = null;
+      const name = (err && err.name) || "";
+      status(name === "NotAllowedError" ? "Camera permission was denied — allow it for this site and try again."
+        : name === "NotFoundError" ? "No camera was found on this device."
+        : name === "NotReadableError" ? "The camera is already in use by another application."
+        : "Could not start the camera" + (name ? " (" + name + ")" : "") + ".", "err");
+      return;
+    }
+    const v = $("camVideo");
+    v.srcObject = cam.stream;
+    $("camPanel").hidden = false;
+    /* the panel carries its own Stop button, so the entry-point button reports state
+       rather than offering a second, identical action */
+    $("camBtn").disabled = true;
+    $("camBtn").textContent = "Webcam active";
+    $("camBtn").title = "Use the panel's Stop camera button to release the device";
+    try { await v.play(); } catch (e) { /* autoplay of a muted stream is normally fine */ }
+    const track = cam.stream.getVideoTracks()[0];
+    const s = track ? track.getSettings() : {};
+    $("camHint").textContent = (s.width && s.height ? s.width + "×" + s.height + " · " : "") +
+      "mirrored preview — the capture matches what you see";
+    status("Camera on. Stop it when you are done so the indicator light goes out.");
+  }
+
+  function camStop(quiet) {
+    if (cam.timer) { clearTimeout(cam.timer); cam.timer = 0; }
+    if (cam.stream) {
+      for (const t of cam.stream.getTracks()) t.stop();
+      cam.stream = null;
+    }
+    const v = $("camVideo");
+    if (v) { v.pause(); v.srcObject = null; }
+    $("camPanel").hidden = true;
+    $("camBtn").disabled = false;
+    $("camBtn").textContent = "Use webcam";
+    $("camBtn").title = "";
+    if (!quiet) status("Camera stopped.");
+  }
+
+  function camCapture() {
+    const v = $("camVideo");
+    if (!cam.stream || !v.videoWidth) { toast("The camera is not ready yet"); return; }
+    const w = v.videoWidth, h = v.videoHeight;
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const x = c.getContext("2d");
+    x.translate(w, 0); x.scale(-1, 1);       /* mirror, so the capture matches the preview */
+    x.drawImage(v, 0, 0, w, h);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+    useSource(c.toDataURL("image/png"), "webcam-" + stamp + ".png");
+    camStop(true);
+    toast("Frame captured");
+  }
+
+  function camShoot() {
+    if (!cam.stream) return;
+    if (!$("camTimer").checked) { camCapture(); return; }
+    let n = 3;
+    $("camHint").textContent = "capturing in " + n + "…";
+    const tick = () => {
+      n -= 1;
+      if (n <= 0) { camCapture(); return; }
+      $("camHint").textContent = "capturing in " + n + "…";
+      cam.timer = setTimeout(tick, 1000);
+    };
+    cam.timer = setTimeout(tick, 1000);
+  }
+
   /* ---------------- exports ----------------
      Every export is built by a pure function of app.out + state, and the download
      buttons only wrap them. The browser gate calls the same builders, so "what you
@@ -1411,12 +1536,19 @@ const Core = (function () {
     $("demoBtn").addEventListener("click", () => useSource(demoSource(), "demo.png"));
     $("clearBtn").addEventListener("click", () => {
       app.src = null; app.out = null; app.srcFull = null; app.name = "image"; app.note = "";
+      camStop(true);
       $("thumbWrap").innerHTML = '<span class="cap">no image</span>';
       $("art").textContent = "Load an image to begin.";
       $("stGrid").textContent = $("stFid").textContent = $("stInk").textContent = "—";
       $("footstat").textContent = "—";
       status("Cleared.");
     });
+
+    /* webcam */
+    $("camBtn").addEventListener("click", () => { cam.stream ? camStop() : camStart(); });
+    $("camStop").addEventListener("click", () => camStop());
+    $("camShot").addEventListener("click", camShoot);
+    window.addEventListener("pagehide", () => camStop(true));
 
     /* controls */
     bindRange("cols", "cols");
@@ -1508,6 +1640,11 @@ const Core = (function () {
     loadDemo: () => $("demoBtn").click(),
     loadDataUrl: (url, name) => useSource(url, name || "test.png"),
     isBusy: () => !!(app.src && !app.out),
+    /* webcam, so a gate can drive capture without a human in front of a lens */
+    cameraActive: () => !!cam.stream,
+    startCamera: () => camStart(),
+    stopCamera: () => camStop(true),
+    captureFrame: () => camShoot(),
     /* built by the same functions the download buttons use */
     buildExports() {
       if (!app.out) return null;
@@ -1529,6 +1666,12 @@ const Core = (function () {
         presetChips: document.querySelectorAll("#presets .chip").length,
         rampOptions: Array.from($("ramp").options).map((o) => o.textContent),
         fileInputs: document.querySelectorAll('input[type="file"]').length,
+        cameraActive: !!cam.stream,
+        camPanelHidden: $("camPanel").hidden,
+        camVideo: { w: $("camVideo").videoWidth, h: $("camVideo").videoHeight,
+                    srcObject: !!$("camVideo").srcObject },
+        camButton: $("camBtn").textContent,
+        imageName: app.name,
       };
     },
   };
