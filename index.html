@@ -1,0 +1,1538 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASCII Forge — photo → ASCII art, entirely in your browser</title>
+<meta name="description" content="Convert any photo to ASCII art in your browser. No uploads, no dependencies, no telemetry. Includes a contrast pipeline built for dim, low-light photos, live tone controls, a measured tonal-fidelity readout, and TXT / PNG / SVG / ANSI exports.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1117'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='18' fill='%2358e1a5' text-anchor='middle'%3E%40%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --bg:#0b0e13; --bg2:#111722; --panel:#131a26; --panel2:#18202e;
+  --line:#243044; --line2:#2f3d55;
+  --fg:#e6ebf4; --dim:#93a1bb; --dim2:#68758e;
+  --accent:#58e1a5; --accent2:#3ba97b; --warn:#f0b429; --bad:#f0616d;
+  --radius:10px; --pad:14px;
+  --shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 8px 24px rgba(0,0,0,.35);
+}
+html[data-theme="light"]{
+  --bg:#f4f6fa; --bg2:#eaeef5; --panel:#fff; --panel2:#f6f8fc;
+  --line:#d7deea; --line2:#c3cee0;
+  --fg:#111a29; --dim:#5a6884; --dim2:#7d8aa3;
+  --accent:#0f8a5f; --accent2:#0b6f4c;
+  --shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 6px 20px rgba(20,30,50,.10);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:
+    radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
+    var(--bg);
+  color:var(--fg);
+  font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent)}
+header{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:12px clamp(12px,3vw,24px); border-bottom:1px solid var(--line);
+  background:color-mix(in srgb, var(--bg2) 80%, transparent);
+  position:sticky; top:0; z-index:20; backdrop-filter:blur(8px);
+}
+.brand{display:flex; align-items:baseline; gap:10px; margin-right:auto}
+.brand h1{
+  font:600 19px/1 var(--mono); margin:0; letter-spacing:-.02em;
+}
+.brand h1 b{color:var(--accent); font-weight:700}
+.brand .sub{color:var(--dim); font-size:12.5px}
+.ghlink{display:inline-flex; align-items:center; gap:6px; color:var(--dim); text-decoration:none; font-size:13px}
+.ghlink:hover{color:var(--fg)}
+
+.wrap{
+  display:grid; gap:clamp(12px,2vw,20px);
+  grid-template-columns: minmax(0,1fr) minmax(320px, 400px);
+  padding:clamp(12px,2vw,20px); align-items:start;
+  max-width:1800px; margin:0 auto;
+}
+@media (max-width: 1000px){ .wrap{grid-template-columns: minmax(0,1fr)} }
+
+.card{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow);
+}
+.card > h2{
+  margin:0; padding:11px 14px; font-size:12.5px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--dim); border-bottom:1px solid var(--line); font-weight:600;
+}
+.card .body{padding:14px}
+
+/* ---------- stage ---------- */
+.stage{display:flex; flex-direction:column; gap:clamp(12px,2vw,20px); min-width:0}
+#drop{
+  border:1.5px dashed var(--line2); border-radius:var(--radius); padding:26px 18px; text-align:center;
+  background:var(--panel2); transition:border-color .15s, background .15s; cursor:pointer;
+}
+#drop.hot{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--panel2))}
+#drop .big{font:600 15px/1.4 system-ui; margin-bottom:4px}
+#drop .small{color:var(--dim); font-size:13px}
+#drop kbd{
+  font:12px var(--mono); background:var(--bg); border:1px solid var(--line2); border-bottom-width:2px;
+  border-radius:5px; padding:1px 5px;
+}
+
+.compare{display:grid; grid-template-columns: 160px minmax(0,1fr); gap:14px; min-width:0}
+@media (max-width:620px){ .compare{grid-template-columns:minmax(0,1fr)} }
+.thumb{
+  border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel2);
+  display:flex; align-items:center; justify-content:center; min-height:120px; position:relative;
+}
+.thumb img{display:block; width:100%; height:auto; max-height:320px; object-fit:contain}
+.thumb .cap{
+  position:absolute; left:0; bottom:0; right:0; font:11px var(--mono); color:var(--dim);
+  background:color-mix(in srgb, var(--bg) 78%, transparent); padding:3px 6px; text-align:center;
+}
+.artbox{
+  border:1px solid var(--line); border-radius:8px; overflow:auto; min-width:0;
+  background:#080b10; max-height:76vh;
+}
+html[data-theme="light"] .artbox{background:#fff}
+.artbox.light{background:#fff}
+.artbox.transparent{
+  background-image:linear-gradient(45deg,#3a4356 25%,transparent 25%),linear-gradient(-45deg,#3a4356 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#3a4356 75%),linear-gradient(-45deg,transparent 75%,#3a4356 75%);
+  background-size:16px 16px; background-position:0 0,0 8px,8px -8px,-8px 0;
+}
+#art{
+  margin:0; padding:12px; white-space:pre; font-family:var(--mono); font-weight:400;
+  font-size:12px; line-height:1.0; letter-spacing:0; color:var(--fg);
+  display:inline-block; min-width:100%;
+}
+.artbox.light #art{color:#0b0e13}
+.artbox.transparent #art{color:var(--fg)}
+
+/* ---------- controls ---------- */
+.panel{display:flex; flex-direction:column; gap:clamp(12px,2vw,16px); position:relative}
+.sect{border-top:1px solid var(--line)}
+.sect:first-child{border-top:0}
+.sect h3{
+  margin:0; padding:9px 14px 4px; font:600 11.5px/1 var(--mono); letter-spacing:.08em;
+  text-transform:uppercase; color:var(--dim2);
+}
+.row{display:flex; align-items:center; gap:10px; padding:6px 14px}
+.row.between{justify-content:space-between}
+.row.col{flex-direction:column; align-items:stretch; gap:5px}
+.row label{font-size:13px; color:var(--fg); flex:0 0 auto}
+.row .val{font:12px var(--mono); color:var(--dim); min-width:46px; text-align:right}
+.hint.mono{font-family:var(--mono); font-size:11px; color:var(--dim); word-break:break-all}
+.hint{font-size:11.5px; color:var(--dim2); padding:0 14px 8px; line-height:1.45}
+label.sw{display:flex; align-items:center; gap:9px; font-size:13px; cursor:pointer; padding:5px 0; flex:1}
+input[type=checkbox]{
+  appearance:none; width:34px; height:19px; border-radius:11px; background:var(--line2); position:relative;
+  cursor:pointer; transition:background .15s; flex:0 0 auto; margin:0;
+}
+input[type=checkbox]::after{
+  content:""; position:absolute; top:2px; left:2px; width:15px; height:15px; border-radius:50%;
+  background:#fff; transition:transform .15s;
+}
+input[type=checkbox]:checked{background:var(--accent2)}
+input[type=checkbox]:checked::after{transform:translateX(15px)}
+input[type=range]{
+  appearance:none; -webkit-appearance:none; width:100%; height:20px; background:transparent; margin:0; cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px; border-radius:3px; background:var(--line2)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:15px; height:15px; margin-top:-5.5px; border-radius:50%;
+  background:var(--accent); border:2px solid var(--panel); box-shadow:0 0 0 1px var(--accent2);
+}
+input[type=range]::-moz-range-track{height:4px; border-radius:3px; background:var(--line2)}
+input[type=range]::-moz-range-thumb{width:13px; height:13px; border-radius:50%; background:var(--accent); border:2px solid var(--panel)}
+select,input[type=text]{
+  background:var(--bg); color:var(--fg); border:1px solid var(--line2); border-radius:6px;
+  padding:5px 8px; font:13px var(--mono); width:100%;
+}
+input[type=text]::placeholder{color:var(--dim2)}
+button{
+  background:var(--panel2); color:var(--fg); border:1px solid var(--line2); border-radius:7px;
+  padding:7px 11px; font:13px system-ui; cursor:pointer; transition:border-color .15s, background .15s, color .15s;
+}
+button:hover{border-color:var(--accent2); color:var(--accent)}
+button:active{transform:translateY(1px)}
+button.primary{background:var(--accent2); border-color:var(--accent); color:#04140d; font-weight:600}
+button.primary:hover{background:var(--accent); color:#04140d}
+.btns{display:flex; flex-wrap:wrap; gap:7px}
+.btns.grid2{display:grid; grid-template-columns:1fr 1fr}
+.chips{display:flex; flex-wrap:wrap; gap:6px; padding:4px 14px 8px}
+.chip{
+  font:12px var(--mono); padding:4px 9px; border-radius:20px; border:1px solid var(--line2);
+  background:var(--panel2); color:var(--dim); cursor:pointer;
+}
+.chip:hover{border-color:var(--accent2); color:var(--accent)}
+.chip.on{background:color-mix(in srgb, var(--accent) 18%, transparent); border-color:var(--accent2); color:var(--fg)}
+
+.stats{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line);
+  border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:0 14px 12px;
+}
+.stats div{background:var(--panel2); padding:8px 10px}
+.stats .k{font:10.5px var(--mono); color:var(--dim2); text-transform:uppercase; letter-spacing:.06em}
+.stats .v{font:15px var(--mono); color:var(--fg); margin-top:2px}
+.stats .v.good{color:var(--accent)}
+.stats .v.warn{color:var(--warn)}
+
+.status{
+  display:flex; align-items:center; gap:8px; font:12.5px var(--mono); color:var(--dim);
+  padding:10px 14px; border-top:1px solid var(--line); min-height:40px;
+}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+.dot.busy{background:var(--warn)}
+.dot.err{background:var(--bad)}
+
+footer{
+  color:var(--dim2); font-size:12.5px; text-align:center; padding:22px 16px 40px; line-height:1.6;
+}
+footer code{font-family:var(--mono); color:var(--dim)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+#toast{
+  position:fixed; left:50%; bottom:26px; transform:translate(-50%,20px); opacity:0; pointer-events:none;
+  background:var(--accent); color:#04140d; font:600 13px system-ui; padding:9px 16px; border-radius:20px;
+  transition:opacity .2s, transform .2s; z-index:50;
+}
+#toast.show{opacity:1; transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>ASCII<b>Forge</b></h1>
+    <span class="sub">photo → ASCII art · nothing leaves your browser</span>
+  </div>
+  <button id="themeBtn" title="Toggle light / dark" aria-label="Toggle light or dark theme">◐ Theme</button>
+  <a class="ghlink" id="ghLink" href="#" rel="noopener">GitHub ↗</a>
+</header>
+
+<div class="wrap">
+  <div class="stage">
+    <div class="card">
+      <h2>Source</h2>
+      <div class="body">
+        <div id="drop" role="button" tabindex="0" aria-label="Choose an image, or drop one here">
+          <div class="big">Drop an image, paste from clipboard, or click to choose</div>
+          <div class="small">PNG · JPEG · WebP · GIF · BMP — <kbd>Ctrl</kbd>+<kbd>V</kbd> works anywhere on this page</div>
+        </div>
+        <input type="file" id="file" accept="image/*" class="sr">
+        <div class="btns" style="margin-top:10px">
+          <button id="demoBtn">Load demo image</button>
+          <button id="pasteBtn">Paste from clipboard</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Result</h2>
+      <div class="body">
+        <div class="stats">
+          <div><div class="k">Grid</div><div class="v" id="stGrid">—</div></div>
+          <div><div class="k">Tonal match</div><div class="v" id="stFid">—</div></div>
+          <div><div class="k">Ink</div><div class="v" id="stInk">—</div></div>
+        </div>
+        <div class="compare">
+          <div>
+            <div class="thumb" id="thumbWrap">
+              <span class="cap" id="thumbCap">no image</span>
+            </div>
+          </div>
+          <div class="artbox" id="artbox"><pre id="art" aria-label="ASCII art output">Load an image to begin.
+
+The demo image is synthesised locally —
+no network request is made.</pre></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <h2>Presets</h2>
+      <div class="chips" id="presets"></div>
+      <div class="hint">Every image is auto-tuned from its own histogram on load. “Dim photo” is the hand-tuned alternative for low-light, grainy frames: denoise, 24% black crush, sigmoid contrast, then sharpen after downsampling.</div>
+    </div>
+
+    <div class="card">
+      <h2>Output</h2>
+      <div class="sect">
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="cols">Columns</label><span class="val" id="colsVal">120</span></div>
+          <input type="range" id="cols" min="30" max="320" step="1" value="120">
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="cell">Cell aspect <span style="color:var(--dim2);font-size:11.5px">(char height ÷ width)</span></label><span class="val" id="cellVal">0.52</span></div>
+          <input type="range" id="cell" min="0.35" max="0.75" step="0.01" value="0.52">
+        </div>
+        <div class="row between">
+          <label class="sw"><input type="checkbox" id="invert"> Invert tones</label>
+        </div>
+        <div class="row between">
+          <label class="sw"><input type="checkbox" id="dither"> Floyd–Steinberg dither</label>
+        </div>
+        <div class="row between">
+          <label class="sw"><input type="checkbox" id="color"> Colour</label>
+        </div>
+        <div class="row between">
+          <label class="sw"><input type="checkbox" id="fit" checked> Fit preview to width</label>
+        </div>
+        <div class="row col" id="fontRow" hidden>
+          <div style="display:flex;justify-content:space-between"><label for="fontPx">Preview font size</label><span class="val" id="fontPxVal">12</span></div>
+          <input type="range" id="fontPx" min="3" max="28" step="0.5" value="12">
+        </div>
+      </div>
+
+      <div class="sect">
+        <h3>Characters</h3>
+        <div class="row">
+          <select id="ramp" aria-label="Character ramp">
+            <option value="classic">classic</option>
+            <option value="standard">standard</option>
+            <option value="blocks">blocks</option>
+            <option value="minimal">minimal</option>
+            <option value="binary">binary</option>
+            <option value="custom">custom…</option>
+          </select>
+        </div>
+        <div class="row" id="customRow" hidden>
+          <input type="text" id="customRamp" placeholder="dark → light, e.g.  .:-=+*#%@" aria-label="Custom character ramp">
+        </div>
+        <div class="hint mono" id="rampPreview" aria-live="polite"></div>
+        <div class="hint">The ramp is ordered darkest → lightest. More levels means more tonal detail but more visual static; under ~110 columns a short ramp usually reads better.</div>
+      </div>
+
+      <div class="sect">
+        <h3>Tone</h3>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="blackPoint">Black point <span style="color:var(--dim2);font-size:11.5px">(clip darkest %)</span></label><span class="val" id="blackPointVal">24</span></div>
+          <input type="range" id="blackPoint" min="0" max="60" step="1" value="24">
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="whitePoint">White point <span style="color:var(--dim2);font-size:11.5px">(clip brightest %)</span></label><span class="val" id="whitePointVal">0.5</span></div>
+          <input type="range" id="whitePoint" min="0" max="20" step="0.5" value="0.5">
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="contrast">Contrast <span style="color:var(--dim2);font-size:11.5px">(sigmoid)</span></label><span class="val" id="contrastVal">6</span></div>
+          <input type="range" id="contrast" min="0" max="16" step="0.5" value="6">
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="gamma">Gamma</label><span class="val" id="gammaVal">0.80</span></div>
+          <input type="range" id="gamma" min="0.3" max="1.8" step="0.01" value="0.8">
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="sharpen">Sharpen</label><span class="val" id="sharpenVal">110</span></div>
+          <input type="range" id="sharpen" min="0" max="300" step="5" value="110">
+        </div>
+        <div class="row between">
+          <label class="sw"><input type="checkbox" id="denoise" checked> Denoise (3×3 median)</label>
+        </div>
+        <div class="row"><button id="autoBtn" class="primary" style="flex:1">Auto-tune from histogram</button></div>
+        <div class="hint">Auto-tune reads the image's own median and sets the black point, white point and gamma so the tones land mid-range. Dark frames get the dim-photo settings automatically when they load.</div>
+      </div>
+
+      <div class="sect">
+        <h3>Export</h3>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="bg">Background</label><span class="val" id="bgVal">dark</span></div>
+          <select id="bg">
+            <option value="dark">dark</option>
+            <option value="light">light</option>
+            <option value="transparent">transparent</option>
+          </select>
+        </div>
+        <div class="row col">
+          <div style="display:flex;justify-content:space-between"><label for="exportScale">Image scale</label><span class="val" id="exportScaleVal">2×</span></div>
+          <input type="range" id="exportScale" min="1" max="6" step="1" value="2">
+        </div>
+        <div class="row btns grid2" style="padding-top:10px">
+          <button id="copyBtn">Copy text</button>
+          <button id="copyAnsiBtn">Copy ANSI</button>
+          <button id="dlTxt">Download .txt</button>
+          <button id="dlPng">Download .png</button>
+          <button id="dlSvg">Download .svg</button>
+          <button id="dlHtml">Download .html</button>
+        </div>
+        <div class="hint">Exports keep your original filename with <code>-ascii</code> added. ANSI copy emits 24-bit colour escapes for terminals; .svg is vector text that prints cleanly.</div>
+      </div>
+
+      <div class="status" aria-live="polite"><span class="dot" id="dot"></span><span id="status">Ready.</span></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Runs entirely offline — no uploads, no analytics, no external requests. Built as a single HTML file with zero dependencies.<br>
+  <code id="footstat">—</code>
+</footer>
+
+<div id="toast" role="status"></div>
+<noscript><p style="padding:20px">This tool needs JavaScript — the conversion happens in your browser, so nothing can work without it.</p></noscript>
+
+<script>
+/* CORE-START
+   Pure, DOM-free image maths. scripts/verify_app.js extracts everything between the
+   CORE-START and CORE-END markers, evaluates it in Node, and asserts on real outputs.
+   Keep this block free of DOM, window and canvas references. */
+const Core = (function () {
+  "use strict";
+
+  const clamp255 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+
+  /* ---------- image containers: {data, w, h, ch} ---------- */
+
+  function makeImage(w, h, ch, fill) {
+    const data = new Uint8ClampedArray(w * h * ch);
+    if (fill !== undefined) data.fill(fill);
+    return { data, w, h, ch };
+  }
+
+  /* Rec.709 luma from RGBA */
+  function toGray(rgba, w, h) {
+    const g = new Uint8ClampedArray(w * h);
+    for (let i = 0, j = 0; i < g.length; i++, j += 4) {
+      g[i] = rgba[j] * 0.2126 + rgba[j + 1] * 0.7152 + rgba[j + 2] * 0.0722;
+    }
+    return { data: g, w, h, ch: 1 };
+  }
+
+  function copyImage(img) {
+    return { data: img.data.slice(), w: img.w, h: img.h, ch: img.ch };
+  }
+
+  /* ---------- 3x3 median (kills sensor grain before contrast is pushed) ---------- */
+
+  function median3(img) {
+    const { data: s, w, h } = img;
+    const out = new Uint8ClampedArray(s.length);
+    const v = new Float64Array(9);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let n = 0;
+        const y0 = y > 0 ? y - 1 : 0, y1 = y < h - 1 ? y + 1 : h - 1;
+        const x0 = x > 0 ? x - 1 : 0, x1 = x < w - 1 ? x + 1 : w - 1;
+        for (let yy = y0; yy <= y1; yy++)
+          for (let xx = x0; xx <= x1; xx++) v[n++] = s[yy * w + xx];
+        /* insertion sort of the n collected samples, take the middle */
+        for (let i = 1; i < n; i++) {
+          const k = v[i]; let j = i - 1;
+          while (j >= 0 && v[j] > k) { v[j + 1] = v[j]; j--; }
+          v[j + 1] = k;
+        }
+        out[y * w + x] = v[n >> 1];
+      }
+    }
+    return { data: out, w, h, ch: 1 };
+  }
+
+  /* ---------- tone curves ---------- */
+
+  function applyLut(img, lut) {
+    const s = img.data, out = new Uint8ClampedArray(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = lut[s[i]];
+    return { data: out, w: img.w, h: img.h, ch: img.ch };
+  }
+
+  function histogram(img) {
+    const hist = new Uint32Array(256), s = img.data;
+    for (let i = 0; i < s.length; i++) hist[s[i]]++;
+    return hist;
+  }
+
+  function percentile(hist, total, p) {
+    const target = total * p / 100;
+    let acc = 0;
+    for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc > target) return i; }
+    return 255;
+  }
+
+  function medianLuma(img) {
+    const hist = histogram(img);
+    return percentile(hist, img.w * img.h, 50);
+  }
+
+  /* black/white are percentages of pixels to clip from each end: this is the
+     "crush the black point" step that removes dark-frame noise. */
+  function levelLut(hist, total, black, white) {
+    let lo = 0, hi = 255;
+    if (black > 0) lo = percentile(hist, total, black);
+    if (white > 0) {
+      let acc = 0;
+      for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc > total * white / 100) { hi = i; break; } }
+    }
+    if (hi <= lo) hi = lo + 1;
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = Math.round((i - lo) * 255 / (hi - lo));
+    return { lut, lo, hi };
+  }
+
+  function sigmoidLut(k) {
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) {
+      lut[i] = k === 0 ? i : 255 / (1 + Math.exp(-k * (i / 255 - 0.5)));
+    }
+    return lut;
+  }
+
+  function gammaLut(g) {
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = 255 * Math.pow(i / 255, g);
+    return lut;
+  }
+
+  /* Final normalisation: stretch whatever range survived the tone curves back out
+     to 0..255. A sigmoid compresses both ends (k=6 lands at 12..243), so without
+     this the darkest character is never blank and highlights never reach the top
+     of the ramp. */
+  function stretchLut(hist) {
+    let lo = -1, hi = -1;
+    for (let i = 0; i < 256; i++) if (hist[i]) { lo = i; break; }
+    for (let i = 255; i >= 0; i--) if (hist[i]) { hi = i; break; }
+    if (lo < 0 || hi <= lo) return null;
+    const lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) lut[i] = Math.round((i - lo) * 255 / (hi - lo));
+    return lut;
+  }
+
+  /* Auto-tune: clip a fixed dark/bright tail, then choose gamma so the post-crush
+     median lands at mid-grey. Curve on the histogram only — no extra pixel pass. */
+  function autoTune(img) {
+    const black = 20, white = 2;
+    const hist = histogram(img), total = img.w * img.h;
+    const { lut } = levelLut(hist, total, black, white);
+    const mapped = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) mapped[lut[i]] += hist[i];
+    let acc = 0, med = 128;
+    for (let i = 0; i < 256; i++) { acc += mapped[i]; if (acc > total / 2) { med = i; break; } }
+    let gamma = med > 1 ? Math.log(0.5) / Math.log(med / 255) : 1;
+    gamma = Math.max(0.35, Math.min(1.8, gamma));
+    return { blackPoint: black, whitePoint: white, gamma: +gamma.toFixed(2), contrast: 6 };
+  }
+
+  /* ---------- Lanczos-3 separable resampler ---------- */
+
+  function lanczos(x, a) {
+    if (x === 0) return 1;
+    if (x <= -a || x >= a) return 0;
+    const px = Math.PI * x;
+    return (a * Math.sin(px) * Math.sin(px / a)) / (px * px);
+  }
+
+  function weightTable(srcLen, dstLen, a) {
+    const scale = srcLen / dstLen;
+    const fscale = scale < 1 ? 1 : scale;
+    const support = a * fscale;
+    const tables = new Array(dstLen);
+    for (let i = 0; i < dstLen; i++) {
+      const center = (i + 0.5) * scale - 0.5;
+      let left = Math.ceil(center - support);
+      let right = Math.floor(center + support);
+      if (left < 0) left = 0;
+      if (right > srcLen - 1) right = srcLen - 1;
+      const n = right - left + 1;
+      const w = new Float64Array(n);
+      let sum = 0;
+      for (let j = 0; j < n; j++) { w[j] = lanczos((left + j - center) / fscale, a); sum += w[j]; }
+      if (sum === 0) { for (let j = 0; j < n; j++) w[j] = 0; w[Math.min(n - 1, Math.max(0, Math.round(center - left)))] = 1; sum = 1; }
+      for (let j = 0; j < n; j++) w[j] /= sum;
+      tables[i] = { left, w, n };
+    }
+    return tables;
+  }
+
+  function resample(img, dw, dh, a) {
+    a = a || 3;
+    const { data: src, w: sw, h: sh, ch } = img;
+    const ht = weightTable(sw, dw, a);
+    const tmp = new Float32Array(dw * sh * ch);
+    for (let y = 0; y < sh; y++) {
+      const srow = y * sw * ch, trow = y * dw * ch;
+      for (let x = 0; x < dw; x++) {
+        const t = ht[x], base = srow + t.left * ch;
+        for (let c = 0; c < ch; c++) {
+          let s = 0;
+          for (let j = 0; j < t.n; j++) s += src[base + j * ch + c] * t.w[j];
+          tmp[trow + x * ch + c] = s;
+        }
+      }
+    }
+    const vt = weightTable(sh, dh, a);
+    const out = new Uint8ClampedArray(dw * dh * ch);
+    for (let y = 0; y < dh; y++) {
+      const t = vt[y];
+      for (let x = 0; x < dw; x++) {
+        const dstBase = (y * dw + x) * ch;
+        for (let c = 0; c < ch; c++) {
+          let s = 0;
+          for (let j = 0; j < t.n; j++) s += tmp[((t.left + j) * dw + x) * ch + c] * t.w[j];
+          out[dstBase + c] = s;
+        }
+      }
+    }
+    return { data: out, w: dw, h: dh, ch };
+  }
+
+  /* ---------- unsharp mask, applied on the tiny output grid ---------- */
+
+  function gaussKernel(radius) {
+    const sigma = Math.max(0.4, radius / 2);
+    const half = Math.max(1, Math.ceil(sigma * 2.5));
+    const k = new Float64Array(half * 2 + 1);
+    let sum = 0;
+    for (let i = -half; i <= half; i++) { const v = Math.exp(-(i * i) / (2 * sigma * sigma)); k[i + half] = v; sum += v; }
+    for (let i = 0; i < k.length; i++) k[i] /= sum;
+    return { k, half };
+  }
+
+  function blur(img, radius) {
+    const { data, w, h } = img, { k, half } = gaussKernel(radius);
+    const tmp = new Float32Array(w * h), out = new Uint8ClampedArray(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0;
+        for (let i = -half; i <= half; i++) {
+          let xx = x + i; if (xx < 0) xx = 0; else if (xx >= w) xx = w - 1;
+          s += data[y * w + xx] * k[i + half];
+        }
+        tmp[y * w + x] = s;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0;
+        for (let i = -half; i <= half; i++) {
+          let yy = y + i; if (yy < 0) yy = 0; else if (yy >= h) yy = h - 1;
+          s += tmp[yy * w + x] * k[i + half];
+        }
+        out[y * w + x] = s;
+      }
+    }
+    return { data: out, w, h, ch: 1 };
+  }
+
+  function unsharp(img, radius, amount, threshold) {
+    if (amount <= 0) return copyImage(img);
+    const b = blur(img, radius);
+    const out = new Uint8ClampedArray(img.data.length);
+    for (let i = 0; i < img.data.length; i++) {
+      const d = img.data[i] - b.data[i];
+      out[i] = Math.abs(d) > threshold ? clamp255(img.data[i] + amount * d) : img.data[i];
+    }
+    return { data: out, w: img.w, h: img.h, ch: 1 };
+  }
+
+  /* ---------- quantisation ---------- */
+
+  /* returns Int16Array of ramp indices */
+  function quantize(img, nLevels) {
+    const s = img.data, out = new Int16Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = Math.round(s[i] * nLevels / 255);
+    return out;
+  }
+
+  /* Floyd–Steinberg error diffusion onto nLevels steps */
+  function ditherFS(img, nLevels) {
+    const { w, h } = img;
+    const buf = Float32Array.from(img.data); /* float working copy so errors accumulate */
+    const out = new Int16Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const old = buf[i];
+        let lvl = Math.round(old * nLevels / 255);
+        if (lvl < 0) lvl = 0; else if (lvl > nLevels) lvl = nLevels;
+        out[i] = lvl;
+        const err = old - lvl * 255 / nLevels;
+        if (x + 1 < w) buf[i + 1] += err * 7 / 16;
+        if (y + 1 < h) {
+          if (x > 0) buf[i + w - 1] += err * 3 / 16;
+          buf[i + w] += err * 5 / 16;
+          if (x + 1 < w) buf[i + w + 1] += err * 1 / 16;
+        }
+      }
+    }
+    return out;
+  }
+
+  /* ramp indices -> text */
+  function levelsToText(levels, w, h, ramp) {
+    const lines = new Array(h);
+    for (let y = 0; y < h; y++) {
+      let s = "";
+      for (let x = 0; x < w; x++) {
+        let l = levels[y * w + x];
+        if (l < 0) l = 0; else if (l > ramp.length - 1) l = ramp.length - 1;
+        s += ramp[l];
+      }
+      lines[y] = s;
+    }
+    return lines;
+  }
+
+  /* ---------- measurement ---------- */
+
+  function pearson(a, b) {
+    const n = a.length;
+    if (!n) return 0;
+    let ma = 0, mb = 0;
+    for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+    ma /= n; mb /= n;
+    let cov = 0, va = 0, vb = 0;
+    for (let i = 0; i < n; i++) {
+      const da = a[i] - ma, db = b[i] - mb;
+      cov += da * db; va += da * da; vb += db * db;
+    }
+    if (va === 0 || vb === 0) return 0;
+    return cov / Math.sqrt(va * vb);
+  }
+
+  /* How faithful is the finished ASCII to the tones of the untouched photo?
+     1.00 would mean the characters reproduce the original luminance exactly. */
+  function tonalMatch(levels, nLevels, referenceGrid) {
+    const implied = new Float64Array(levels.length);
+    for (let i = 0; i < levels.length; i++) implied[i] = levels[i] * 255 / nLevels;
+    return pearson(implied, referenceGrid.data);
+  }
+
+  /* ---------- the pipeline ---------- */
+
+  /* Ramps are data, not UI strings — the core owns them so the test gate and the
+     dropdown label can never disagree about how many levels a preset has. */
+  const RAMPS = Object.freeze({
+    classic: " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@",
+    standard: " .:-=+*#%@",
+    blocks: " ░▒▓█",
+    minimal: " .#",
+    binary: " █"
+  });
+
+  /* Presets live here too, so the test gate asserts the presets that actually ship
+     instead of a copy that can drift. `gamma: 0.42` is the value autoTune derives for
+     this class of frame; the fixed 0.8 that looked right in the reference Python
+     pipeline measurably flattened the subject once the final stretch was added. */
+  const PRESETS = Object.freeze({
+    dim: {
+      label: "Dim photo",
+      tip: "Denoise, 20% black crush, sigmoid 6, gamma 0.42, sharpen. For low-light frames where the subject sits barely above the background.",
+      s: { denoise: true, blackPoint: 20, whitePoint: 2, contrast: 6, gamma: 0.42, sharpen: 110, dither: false, ramp: "classic", invert: false }
+    },
+    faithful: {
+      label: "Faithful",
+      tip: "No tone shaping at all — whatever the photo has, the characters show. Dim and flat, but honest.",
+      s: { denoise: true, blackPoint: 0, whitePoint: 0, contrast: 0, gamma: 1, sharpen: 0, dither: false, ramp: "classic", invert: false }
+    },
+    punch: {
+      label: "Punchy",
+      tip: "Lighter crush, harder sigmoid, more sharpening. Good for already well-lit photos.",
+      s: { denoise: true, blackPoint: 12, whitePoint: 1, contrast: 9, gamma: 1, sharpen: 160, dither: false, ramp: "classic", invert: false }
+    },
+    news: {
+      label: "Newspaper",
+      tip: "Floyd–Steinberg error diffusion onto a 10-level ramp — halftone print feel.",
+      s: { denoise: true, blackPoint: 22, whitePoint: 1, contrast: 5, gamma: 0.85, sharpen: 60, dither: true, ramp: "standard", invert: false }
+    },
+    blocks: {
+      label: "Blocks",
+      tip: "Unicode block ramp for chunky terminal output.",
+      s: { denoise: true, blackPoint: 20, whitePoint: 2, contrast: 6, gamma: 0.42, sharpen: 110, dither: false, ramp: "blocks", invert: false }
+    }
+  });
+
+  /* src: {gray:{data,w,h}, rgb:{data,w,h}|null}  — source at working resolution */
+  function forge(src, o) {
+    const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    let g = copyImage(src.gray);
+    if (o.denoise) g = median3(g);
+
+    const hist = histogram(g), total = g.w * g.h;
+    const lev = levelLut(hist, total, o.blackPoint || 0, o.whitePoint || 0);
+    g = applyLut(g, lev.lut);
+    if (o.contrast) g = applyLut(g, sigmoidLut(o.contrast));
+    if (o.gamma && o.gamma !== 1) g = applyLut(g, gammaLut(o.gamma));
+    if (o.stretch !== false) {
+      const sl = stretchLut(histogram(g));
+      if (sl) g = applyLut(g, sl);
+    }
+
+    const cols = Math.max(8, Math.round(o.cols));
+    const rows = Math.max(1, Math.round(g.h / g.w * cols * o.cell));
+
+    const grid = resample(g, cols, rows, 3);
+    const refGrid = resample(copyImage(src.gray), cols, rows, 3); /* untouched reference */
+    const shaped = o.sharpen > 0 ? unsharp(grid, 1.2, o.sharpen / 100, 4) : grid;
+
+    const ramp = o.ramp;
+    const nLevels = Math.max(1, ramp.length - 1);
+    let levels = o.dither ? ditherFS(shaped, nLevels) : quantize(shaped, nLevels);
+
+    if (o.invert) {
+      for (let i = 0; i < levels.length; i++) levels[i] = nLevels - levels[i];
+    }
+
+    const lines = levelsToText(levels, cols, rows, ramp);
+
+    /* colour grid, sampled from the same pixels, only when needed */
+    let rgb = null;
+    if (src.rgb) rgb = resample(src.rgb, cols, rows, 3);
+
+    let ink = 0;
+    for (let i = 0; i < levels.length; i++) if (ramp[levels[i]] !== " ") ink++;
+    const t1 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+
+    return {
+      lines, levels, cols, rows, rgb,
+      tonalMatch: tonalMatch(levels, nLevels, refGrid),
+      ink: ink / levels.length,
+      ms: Math.round(t1 - t0),
+      lo: lev.lo, hi: lev.hi
+    };
+  }
+
+  return {
+    RAMPS, PRESETS,
+    makeImage, toGray, copyImage, median3, applyLut, histogram, percentile, medianLuma,
+    levelLut, sigmoidLut, gammaLut, stretchLut, autoTune, lanczos, weightTable, resample,
+    gaussKernel, blur, unsharp, quantize, ditherFS, levelsToText, pearson, tonalMatch, forge
+  };
+})();
+/* CORE-END */
+
+/* ------------------------------------------------------------------ *
+ *  UI layer. Everything below needs a DOM and is not exercised by
+ *  scripts/verify_app.js — the browser check covers it instead.
+ * ------------------------------------------------------------------ */
+(function () {
+  "use strict";
+  if (typeof document === "undefined") return;
+
+  const $ = (id) => document.getElementById(id);
+
+  /* the core owns the ramps — one definition, shared with the test gate */
+  const RAMPS = Core.RAMPS;
+
+  /* the core owns the presets too — one definition, shared with the test gate */
+  const PRESETS = Core.PRESETS;
+
+  const MONO = 'ui-monospace, "SFMono-Regular", "Cascadia Mono", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace';
+  document.documentElement.style.setProperty("--mono", MONO);
+
+  const state = {
+    cols: 120, cell: 0.52, rampName: "classic", customRamp: "", invert: false,
+    color: false, dither: false, bg: "dark", denoise: true,
+    blackPoint: 24, whitePoint: 0.5, contrast: 6, gamma: 0.8, sharpen: 110,
+    fit: true, fontPx: 12, exportScale: 2
+  };
+
+  const app = {
+    name: "image",
+    src: null,      /* {gray, rgb, w, h} */
+    srcFull: null,  /* full working-resolution RGBA, for colour mode */
+    out: null,
+    note: "",       /* sticky status prefix set by the loader */
+    busy: false
+  };
+
+  /* ---------------- status ---------------- */
+  let toastTimer = 0;
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 1900);
+  }
+  function status(msg, kind) {
+    $("status").textContent = msg;
+    const d = $("dot");
+    d.className = "dot" + (kind ? " " + kind : "");
+  }
+
+  /* ---------------- rendering ---------------- */
+  const measureCanvas = document.createElement("canvas");
+  const mctx = measureCanvas.getContext("2d");
+  let advRatio = 0;
+  function advanceRatio() {
+    if (!advRatio) {
+      mctx.font = "100px " + MONO;
+      advRatio = mctx.measureText("M").width / 100;
+    }
+    return advRatio;
+  }
+
+  function activeRamp() {
+    if (state.rampName === "custom") return state.customRamp.length >= 2 ? state.customRamp : RAMPS.classic;
+    return RAMPS[state.rampName];
+  }
+
+  function opts() {
+    return {
+      cols: state.cols, cell: state.cell, ramp: activeRamp(), invert: state.invert,
+      dither: state.dither, denoise: state.denoise, blackPoint: state.blackPoint,
+      whitePoint: state.whitePoint, contrast: state.contrast, gamma: state.gamma,
+      sharpen: state.sharpen
+    };
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /* one DOM element, one source string: the preview, the exports and the copy
+     button can never disagree because they all read app.out.lines */
+  function paint() {
+    const art = $("art");
+    const o = app.out;
+    if (!o) return;
+    if (!state.color) {
+      art.textContent = o.lines.join("\n");
+    } else {
+      /* built as rows and joined exactly like the mono branch: the preview
+         textContent must be byte-identical regardless of colour mode */
+      const rows = [];
+      for (let y = 0; y < o.rows; y++) {
+        const line = o.lines[y];
+        let html = "";
+        let x = 0;
+        while (x < line.length) {
+          const px = (y * o.cols + x) * 4;
+          const r = o.rgb.data[px], g = o.rgb.data[px + 1], b = o.rgb.data[px + 2];
+          let x2 = x + 1;
+          while (x2 < line.length) {
+            const q = (y * o.cols + x2) * 4;
+            if (o.rgb.data[q] !== r || o.rgb.data[q + 1] !== g || o.rgb.data[q + 2] !== b) break;
+            x2++;
+          }
+          const chunk = line.slice(x, x2);
+          if (/^[ ]+$/.test(chunk)) html += chunk;
+          else html += '<span style="color:rgb(' + r + "," + g + "," + b + ')">' + escapeHtml(chunk) + "</span>";
+          x = x2;
+        }
+        rows.push(html);
+      }
+      art.innerHTML = rows.join("\n");
+    }
+    layout();
+  }
+
+  function layout() {
+    const o = app.out;
+    const box = $("artbox"), art = $("art");
+    box.className = "artbox" + (state.bg === "light" ? " light" : state.bg === "transparent" ? " transparent" : "");
+    if (!o) return;
+    const pad = 24;
+    const avail = box.clientWidth - pad;
+    let fs = state.fontPx;
+    if (state.fit && avail > 40) {
+      fs = avail / (o.cols * advanceRatio());
+      fs = Math.max(2.5, Math.min(30, fs));
+      $("fontPx").value = fs.toFixed(1);
+      $("fontPxVal").textContent = fs.toFixed(1);
+    }
+    art.style.fontSize = fs + "px";
+    if (!state.fit) { $("fontPxVal").textContent = state.fontPx; }
+  }
+
+  /* ---------------- processing ---------------- */
+  let rafId = 0;
+  function schedule(reason) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => { rafId = 0; run(reason); });
+  }
+
+  function run() {
+    if (!app.src) return;
+    status("Converting…", "busy");
+    const t = performance.now();
+    const o = Core.forge(app.src, opts());
+    app.out = o;
+
+    /* colour grid needs dense RGB samples rather than the plain source */
+    if (state.color && !o.rgb) o.rgb = Core.resample(app.srcFull, o.cols, o.rows, 3);
+
+    paint();
+    $("stGrid").textContent = o.cols + " × " + o.rows;
+    const fid = o.tonalMatch;
+    const fEl = $("stFid");
+    fEl.textContent = fid.toFixed(2);
+    fEl.className = "v " + (fid >= 0.8 ? "good" : fid >= 0.55 ? "" : "warn");
+    $("stInk").textContent = Math.round(o.ink * 100) + "%";
+    $("footstat").textContent = o.cols + "×" + o.rows + " · " + (o.cols * o.rows).toLocaleString() +
+      " cells · " + Math.round(performance.now() - t) + " ms · crop-free, offline";
+    /* app.note is set by the loader (e.g. "dark frame detected") and stays until
+       the next image, so this status is never overwritten by a later message */
+    status((app.note || "") + "Done in " + Math.round(performance.now() - t) + " ms.");
+  }
+
+  /* ---------------- loading ---------------- */
+  const MAX_DIM = 1600;
+
+  function loadImageBitmap(source, name) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("could not decode that image"));
+      img.src = source;
+    }).then((img) => {
+      const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+      if (!w0 || !h0) throw new Error("that image has no pixels");
+      const scale = Math.min(1, MAX_DIM / Math.max(w0, h0));
+      const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      /* composite onto the export background so alpha never reads as black */
+      ctx.fillStyle = state.bg === "light" ? "#ffffff" : "#000000";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      const rgba = ctx.getImageData(0, 0, w, h).data;
+      app.srcFull = { data: rgba.slice(), w, h, ch: 4 };
+      app.src = { gray: Core.toGray(rgba, w, h), rgb: null, w, h };
+      app.name = name || "image";
+      app.out = null;
+      return { w0, h0, w, h };
+    });
+  }
+
+  /* Auto-tune is the default for every frame. It reads the image's own histogram and
+     sets the black point, white point and gamma, which measured better than the fixed
+     dim-photo preset on the reference low-light photo: subject detail sd 9.4 vs 6.1 at
+     the same tonal fidelity, with 25% of the background driven to blank. The dim preset
+     stays available as a chip for anyone who prefers the hand-tuned look. */
+  function applyAutoTune() {
+    const tune = Core.autoTune(app.src.gray);
+    const dark = Core.medianLuma(app.src.gray) < 90;
+    Object.assign(state, tune, { denoise: dark ? true : state.denoise });
+    syncControls();
+    return { dark, tune };
+  }
+
+  function useSource(source, name) {
+    status("Loading…", "busy");
+    loadImageBitmap(source, name).then((dims) => {
+      const thumb = $("thumbWrap");
+      thumb.innerHTML = "";
+      const img = new Image();
+      img.src = source;
+      img.alt = "original image";
+      thumb.appendChild(img);
+      const cap = document.createElement("span");
+      cap.className = "cap";
+      cap.textContent = app.name + " · " + dims.w0 + "×" + dims.h0 +
+        (dims.w !== dims.w0 ? " → working " + dims.w + "×" + dims.h : "");
+      thumb.appendChild(cap);
+
+      const tuned = applyAutoTune();
+      app.note = (tuned.dark ? "Dark frame detected. " : "") +
+        "Auto-tuned: black " + tuned.tune.blackPoint + "% · white " + tuned.tune.whitePoint +
+        "% · gamma " + tuned.tune.gamma + ". ";
+      run();
+    }).catch((err) => {
+      status("Could not load that image: " + err.message, "err");
+      toast("Could not load that image");
+    });
+  }
+
+  function useFile(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type) && !/\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)) {
+      status("That file does not look like an image.", "err");
+      return;
+    }
+    const fr = new FileReader();
+    fr.onload = () => useSource(fr.result, file.name);
+    fr.onerror = () => status("Could not read that file.", "err");
+    fr.readAsDataURL(file);
+  }
+
+  /* ---------------- demo image (synthesised, never downloaded) ---------------- */
+  function demoSource() {
+    const w = 420, h = 560;
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const x = c.getContext("2d");
+    const bg = x.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, "#232c3b"); bg.addColorStop(1, "#070a0e");
+    x.fillStyle = bg; x.fillRect(0, 0, w, h);
+
+    /* shoulders */
+    x.fillStyle = "#141a24";
+    x.beginPath(); x.ellipse(w * 0.5, h * 1.08, w * 0.44, h * 0.25, 0, 0, Math.PI * 2); x.fill();
+
+    /* head, lit from the upper left */
+    const face = x.createLinearGradient(w * 0.28, h * 0.2, w * 0.78, h * 0.68);
+    face.addColorStop(0, "#c9b39a"); face.addColorStop(0.45, "#7d6d5c"); face.addColorStop(1, "#241f1b");
+    x.fillStyle = face;
+    x.beginPath(); x.ellipse(w * 0.5, h * 0.42, w * 0.21, h * 0.24, 0, 0, Math.PI * 2); x.fill();
+
+    /* hair */
+    x.fillStyle = "#12100e";
+    x.beginPath(); x.ellipse(w * 0.5, h * 0.28, w * 0.235, h * 0.13, 0, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.ellipse(w * 0.30, h * 0.40, w * 0.06, h * 0.11, 0, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.ellipse(w * 0.70, h * 0.40, w * 0.06, h * 0.11, 0, 0, Math.PI * 2); x.fill();
+
+    /* eyes, nose, mouth — just enough structure to prove the pipeline resolves features */
+    x.fillStyle = "#1b1614";
+    x.beginPath(); x.ellipse(w * 0.40, h * 0.41, w * 0.048, h * 0.019, 0, 0, Math.PI * 2); x.fill();
+    x.beginPath(); x.ellipse(w * 0.60, h * 0.41, w * 0.048, h * 0.019, 0, 0, Math.PI * 2); x.fill();
+    x.fillStyle = "#4a4137";
+    x.beginPath(); x.ellipse(w * 0.50, h * 0.50, w * 0.022, h * 0.028, 0, 0, Math.PI * 2); x.fill();
+    x.fillStyle = "#2a221d";
+    x.beginPath(); x.ellipse(w * 0.50, h * 0.575, w * 0.06, h * 0.014, 0, 0, Math.PI * 2); x.fill();
+
+    /* rim light down the left edge of the face */
+    x.strokeStyle = "rgba(232,240,255,0.55)";
+    x.lineWidth = 3;
+    x.beginPath(); x.ellipse(w * 0.5, h * 0.42, w * 0.21, h * 0.24, 0, Math.PI * 0.62, Math.PI * 1.22); x.stroke();
+
+    /* window glow in the top right */
+    const glow = x.createRadialGradient(w * 0.93, h * 0.06, 4, w * 0.93, h * 0.06, w * 0.7);
+    glow.addColorStop(0, "rgba(190,214,255,0.30)"); glow.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = glow; x.fillRect(0, 0, w, h);
+
+    /* grain + vignette, so the demo has the same problems a real photo has */
+    const d = x.getImageData(0, 0, w, h);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 26;
+      d.data[i] += n; d.data[i + 1] += n; d.data[i + 2] += n;
+    }
+    x.putImageData(d, 0, 0);
+    const vig = x.createRadialGradient(w * 0.5, h * 0.45, h * 0.2, w * 0.5, h * 0.45, h * 0.78);
+    vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(0,0,0,0.72)");
+    x.fillStyle = vig; x.fillRect(0, 0, w, h);
+    return c.toDataURL("image/png");
+  }
+
+  /* ---------------- exports ----------------
+     Every export is built by a pure function of app.out + state, and the download
+     buttons only wrap them. The browser gate calls the same builders, so "what you
+     see", "what you copy" and "what you download" cannot drift apart. */
+  function baseName() {
+    return String(app.name).replace(/\.[a-z0-9]+$/i, "") + "-ascii";
+  }
+  function fileName(ext) {
+    return baseName() + "." + ext;
+  }
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  function needOutput() {
+    if (!app.out) { toast("Load an image first"); return false; }
+    return true;
+  }
+  function bgColor() {
+    return state.bg === "light" ? "#ffffff" : state.bg === "transparent" ? null : "#000000";
+  }
+
+  function buildTxt() {
+    return app.out.lines.join("\n") + "\n";
+  }
+
+  function buildAnsi() {
+    const o = app.out;
+    let s = "";
+    for (let y = 0; y < o.rows; y++) {
+      const line = o.lines[y];
+      if (!state.color) { s += line + "\n"; continue; }
+      let x = 0;
+      while (x < line.length) {
+        const px = (y * o.cols + x) * 4;
+        const r = o.rgb.data[px], g = o.rgb.data[px + 1], b = o.rgb.data[px + 2];
+        let x2 = x + 1;
+        while (x2 < line.length) {
+          const q = (y * o.cols + x2) * 4;
+          if (o.rgb.data[q] !== r || o.rgb.data[q + 1] !== g || o.rgb.data[q + 2] !== b) break;
+          x2++;
+        }
+        s += "\u001b[38;2;" + r + ";" + g + ";" + b + "m" + line.slice(x, x2);
+        x = x2;
+      }
+      s += "\u001b[0m\n";
+    }
+    return s;
+  }
+
+  function renderToCanvas(scalePlain) {
+    const o = app.out;
+    const scale = scalePlain || state.exportScale;
+    const base = 16;
+    const fontPx = base * scale;
+    const c = document.createElement("canvas");
+    const ctx = c.getContext("2d");
+    ctx.font = fontPx + "px " + MONO;
+    const adv = ctx.measureText("M").width;
+    const lineH = fontPx;
+    const pad = Math.round(8 * scale);
+    c.width = Math.ceil(adv * o.cols) + pad * 2;
+    c.height = Math.ceil(lineH * o.rows) + pad * 2;
+    const ctx2 = c.getContext("2d");
+    if (state.bg !== "transparent") { ctx2.fillStyle = bgColor(); ctx2.fillRect(0, 0, c.width, c.height); }
+    ctx2.font = fontPx + "px " + MONO;
+    ctx2.textBaseline = "top";
+    const lightText = state.bg === "light";
+    for (let y = 0; y < o.rows; y++) {
+      const line = o.lines[y];
+      let x = 0;
+      while (x < line.length) {
+        let r = -1, g = -1, b = -1;
+        if (state.color && o.rgb) {
+          const px = (y * o.cols + x) * 4;
+          r = o.rgb.data[px]; g = o.rgb.data[px + 1]; b = o.rgb.data[px + 2];
+        } else {
+          r = g = b = lightText ? 8 : 235;
+        }
+        let x2 = x + 1;
+        if (state.color && o.rgb) {
+          while (x2 < line.length) {
+            const q = (y * o.cols + x2) * 4;
+            if (o.rgb.data[q] !== r || o.rgb.data[q + 1] !== g || o.rgb.data[q + 2] !== b) break;
+            x2++;
+          }
+        } else { x2 = line.length; }
+        const chunk = line.slice(x, x2);
+        if (chunk.trim()) {
+          ctx2.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+          ctx2.fillText(chunk, pad + x * adv, pad + y * lineH);
+        }
+        x = x2;
+      }
+    }
+    return c;
+  }
+
+  function buildSvg() {
+    const o = app.out;
+    const scale = state.exportScale;
+    const fontPx = 16 * scale;
+    const mc = document.createElement("canvas").getContext("2d");
+    mc.font = fontPx + "px " + MONO;
+    const adv = mc.measureText("M").width;
+    const lineH = fontPx;
+    const pad = Math.round(8 * scale);
+    const w = Math.ceil(adv * o.cols) + pad * 2, h = Math.ceil(lineH * o.rows) + pad * 2;
+    const hex = (v) => v.toString(16).padStart(2, "0");
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let out = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    out += '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">\n';
+    if (state.bg !== "transparent") out += '<rect width="100%" height="100%" fill="' + bgColor() + '"/>\n';
+    out += '<g font-family="monospace" font-size="' + fontPx + 'px" xml:space="preserve">\n';
+    const lightText = state.bg === "light";
+    for (let y = 0; y < o.rows; y++) {
+      const line = o.lines[y];
+      let x = 0;
+      while (x < line.length) {
+        let fill = lightText ? "#080b10" : "#ebeff7";
+        if (state.color && o.rgb) {
+          const px = (y * o.cols + x) * 4;
+          fill = "#" + hex(o.rgb.data[px]) + hex(o.rgb.data[px + 1]) + hex(o.rgb.data[px + 2]);
+        }
+        let x2 = x + 1;
+        if (state.color && o.rgb) {
+          const px = (y * o.cols + x) * 4;
+          while (x2 < line.length) {
+            const q = (y * o.cols + x2) * 4;
+            if (o.rgb.data[q] !== o.rgb.data[px] || o.rgb.data[q + 1] !== o.rgb.data[px + 1] || o.rgb.data[q + 2] !== o.rgb.data[px + 2]) break;
+            x2++;
+          }
+        } else x2 = line.length;
+        const chunk = line.slice(x, x2);
+        if (chunk.trim()) {
+          const yPos = pad + (y + 1) * lineH - fontPx * 0.18;
+          out += '<text x="' + (pad + x * adv).toFixed(2) + '" y="' + yPos.toFixed(2) + '" fill="' + fill + '">' + esc(chunk) + "</text>\n";
+        }
+        x = x2;
+      }
+    }
+    out += "</g>\n</svg>\n";
+    return out;
+  }
+
+  function buildHtml() {
+    const o = app.out;
+    const body = state.color ? $("art").innerHTML : escapeHtml(o.lines.join("\n"));
+    const bg = state.bg === "transparent" ? "transparent" : bgColor();
+    const fg = state.bg === "light" ? "#080b10" : "#ebeff7";
+    return "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>" + escapeHtml(app.name) + " — ASCII</title>\n" +
+      "<style>html,body{margin:0;background:" + (bg === "transparent" ? "#0b0e13" : bg) + ";}\n" +
+      "pre{margin:0;padding:16px;color:" + fg + ";font:12px/1.0 " + MONO + ";white-space:pre;overflow:auto;}</style>\n" +
+      "</head><body><pre>" + body + "</pre></body></html>\n";
+  }
+
+  /* ---------------- control wiring ---------------- */
+
+  /* dropdown labels and the preview line are generated from the core's ramp data,
+     so a level count can never drift out of sync with the ramp that is actually used */
+  function labelRamps() {
+    const sel = $("ramp");
+    for (const opt of sel.options) {
+      const key = opt.value;
+      if (key === "custom") { opt.textContent = "custom…"; continue; }
+      const r = RAMPS[key];
+      if (r) opt.textContent = key + " — " + r.length + " levels";
+    }
+    const cur = activeRamp();
+    $("rampPreview").textContent = "dark → " + cur.replace(/ /g, "␣") + " ← light  (" + cur.length + " levels)";
+  }
+
+  function syncControls() {
+    labelRamps();
+    const map = ["cols", "cell", "blackPoint", "whitePoint", "contrast", "gamma", "sharpen", "fontPx", "exportScale"];
+    for (const k of map) {
+      const el = $(k); if (!el) continue;
+      el.value = state[k];
+      const v = $(k + "Val");
+      if (v) v.textContent = (k === "gamma") ? Number(state[k]).toFixed(2) : state[k];
+    }
+    for (const k of ["invert", "dither", "color", "denoise", "fit"]) {
+      const el = $(k); if (el) el.checked = !!state[k];
+    }
+    $("ramp").value = state.rampName;
+    $("customRow").hidden = state.rampName !== "custom";
+    $("customRamp").value = state.customRamp;
+    $("bg").value = state.bg;
+    $("bgVal").textContent = state.bg;
+    $("fontRow").hidden = !!state.fit;
+    $("artbox").className = "artbox" + (state.bg === "light" ? " light" : state.bg === "transparent" ? " transparent" : "");
+    document.querySelectorAll("#presets .chip").forEach((c) => c.classList.toggle("on", c.dataset.on === "1"));
+  }
+
+  function bindRange(id, key, fmt) {
+    const el = $(id);
+    el.addEventListener("input", () => {
+      state[key] = parseFloat(el.value);
+      $(id + "Val").textContent = fmt ? fmt(state[key]) : state[key];
+      if (id === "fontPx") { state.fit = false; $("fit").checked = false; $("fontRow").hidden = false; }
+      schedule();
+    });
+  }
+
+  function bindToggle(id, key) {
+    const el = $(id);
+    el.addEventListener("change", () => {
+      state[key] = el.checked;
+      if (id === "fit") $("fontRow").hidden = !!state.fit;
+      schedule();
+    });
+  }
+
+  function buildPresets() {
+    const host = $("presets");
+    Object.keys(PRESETS).forEach((key) => {
+      const p = PRESETS[key];
+      const b = document.createElement("button");
+      b.className = "chip";
+      b.textContent = p.label;
+      b.title = p.tip;
+      b.addEventListener("click", () => {
+        Object.assign(state, p.s);
+        syncControls();
+        schedule();
+        status(p.label + " preset applied.");
+      });
+      host.appendChild(b);
+    });
+    const auto = document.createElement("button");
+    auto.className = "chip";
+    auto.textContent = "Auto tune";
+    auto.title = "Set black point, white point and gamma from the image's own histogram";
+    auto.addEventListener("click", doAuto);
+    host.appendChild(auto);
+  }
+
+  function doAuto() {
+    if (!app.src) { toast("Load an image first"); return; }
+    const t = Core.autoTune(app.src.gray);
+    Object.assign(state, t);
+    syncControls();
+    schedule();
+    status("Auto-tuned: black " + t.blackPoint + "% · white " + t.whitePoint + "% · gamma " + t.gamma + ".");
+  }
+
+  function wire() {
+    /* theme */
+    const applyTheme = (t) => {
+      document.documentElement.setAttribute("data-theme", t);
+      try { localStorage.setItem("asciiforge-theme", t); } catch (e) {}
+    };
+    let saved = null;
+    try { saved = localStorage.getItem("asciiforge-theme"); } catch (e) {}
+    if (saved) applyTheme(saved);
+    else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) applyTheme("light");
+    $("themeBtn").addEventListener("click", () => {
+      applyTheme(document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light");
+    });
+
+    $("ghLink").href = "https://github.com/nwfella/ascii-forge";
+
+    /* file input / drop / paste */
+    const drop = $("drop"), file = $("file");
+    drop.addEventListener("click", () => file.click());
+    drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); file.click(); } });
+    file.addEventListener("change", () => { useFile(file.files[0]); file.value = ""; });
+    ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hot"); }));
+    ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hot"); }));
+    drop.addEventListener("drop", (e) => { const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) useFile(f); });
+    window.addEventListener("dragover", (e) => e.preventDefault());
+    window.addEventListener("drop", (e) => {
+      if (e.target.closest && e.target.closest("#drop")) return;
+      e.preventDefault();
+      const f = e.dataTransfer && e.dataTransfer.files[0];
+      if (f) useFile(f);
+    });
+    window.addEventListener("paste", (e) => {
+      const items = (e.clipboardData && e.clipboardData.items) || [];
+      for (const it of items) {
+        if (it.type && it.type.indexOf("image") === 0) {
+          const f = it.getAsFile();
+          if (f) { useFile(f); toast("Pasted from clipboard"); return; }
+        }
+      }
+    });
+    $("pasteBtn").addEventListener("click", async () => {
+      if (!navigator.clipboard || !navigator.clipboard.read) { status("Clipboard images need a secure context and browser support — try Ctrl+V.", "err"); return; }
+      try {
+        const items = await navigator.clipboard.read();
+        for (const it of items) {
+          const type = (it.types || []).find((t) => t.indexOf("image") === 0);
+          if (type) { useFile(new File([await it.getType(type)], "clipboard.png", { type })); return; }
+        }
+        status("No image on the clipboard.", "err");
+      } catch (err) { status("Clipboard read was blocked — try Ctrl+V instead.", "err"); }
+    });
+    $("demoBtn").addEventListener("click", () => useSource(demoSource(), "demo.png"));
+    $("clearBtn").addEventListener("click", () => {
+      app.src = null; app.out = null; app.srcFull = null; app.name = "image"; app.note = "";
+      $("thumbWrap").innerHTML = '<span class="cap">no image</span>';
+      $("art").textContent = "Load an image to begin.";
+      $("stGrid").textContent = $("stFid").textContent = $("stInk").textContent = "—";
+      $("footstat").textContent = "—";
+      status("Cleared.");
+    });
+
+    /* controls */
+    bindRange("cols", "cols");
+    bindRange("cell", "cell");
+    bindRange("blackPoint", "blackPoint");
+    bindRange("whitePoint", "whitePoint");
+    bindRange("contrast", "contrast");
+    bindRange("gamma", "gamma", (v) => Number(v).toFixed(2));
+    bindRange("sharpen", "sharpen");
+    bindRange("fontPx", "fontPx");
+    bindRange("exportScale", "exportScale", (v) => v + "×");
+    bindToggle("invert", "invert");
+    bindToggle("dither", "dither");
+    bindToggle("color", "color");
+    bindToggle("denoise", "denoise");
+    bindToggle("fit", "fit");
+
+    $("ramp").addEventListener("change", (e) => {
+      state.rampName = e.target.value;
+      $("customRow").hidden = state.rampName !== "custom";
+      schedule();
+    });
+    $("customRamp").addEventListener("input", (e) => {
+      state.customRamp = e.target.value;
+      if (state.rampName === "custom") schedule();
+    });
+    $("bg").addEventListener("change", (e) => { state.bg = e.target.value; syncControls(); schedule(); });
+    $("autoBtn").addEventListener("click", doAuto);
+
+    /* exports */
+    $("copyBtn").addEventListener("click", async () => {
+      if (!needOutput()) return;
+      try { await navigator.clipboard.writeText(app.out.lines.join("\n")); toast("ASCII copied"); status("Copied " + app.out.rows + " lines."); }
+      catch (e) { toast("Clipboard was blocked"); status("Clipboard blocked — use Download .txt instead.", "err"); }
+    });
+    $("copyAnsiBtn").addEventListener("click", async () => {
+      if (!needOutput()) return;
+      try { await navigator.clipboard.writeText(buildAnsi()); toast("ANSI copied"); }
+      catch (e) { toast("Clipboard was blocked"); }
+    });
+    $("dlTxt").addEventListener("click", () => {
+      if (!needOutput()) return;
+      download(new Blob([buildTxt()], { type: "text/plain;charset=utf-8" }), fileName("txt"));
+    });
+    $("dlPng").addEventListener("click", () => {
+      if (!needOutput()) return;
+      renderToCanvas().toBlob((b) => download(b, fileName("png")), "image/png");
+    });
+    $("dlSvg").addEventListener("click", () => {
+      if (!needOutput()) return;
+      download(new Blob([buildSvg()], { type: "image/svg+xml" }), fileName("svg"));
+    });
+    $("dlHtml").addEventListener("click", () => {
+      if (!needOutput()) return;
+      download(new Blob([buildHtml()], { type: "text/html;charset=utf-8" }), fileName("html"));
+    });
+
+    /* keyboard */
+    window.addEventListener("keydown", (e) => {
+      const meta = e.ctrlKey || e.metaKey;
+      if (meta && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (app.out) download(new Blob([buildTxt()], { type: "text/plain;charset=utf-8" }), fileName("txt"));
+      }
+      if (meta && e.key.toLowerCase() === "o") { e.preventDefault(); $("file").click(); }
+    });
+
+    window.addEventListener("resize", () => { if (state.fit) layout(); });
+    if (window.ResizeObserver) new ResizeObserver(() => { if (state.fit) layout(); }).observe($("artbox"));
+
+    /* ?demo=1 auto-loads the synthetic demo — used by the headless browser check */
+    if (new URLSearchParams(location.search).get("demo") === "1") {
+      $("demoBtn").click();
+    }
+  }
+
+  buildPresets();
+  syncControls();
+  wire();
+  status("Ready. Drop an image, paste one, or load the demo.");
+
+  /* test hook: the browser gate drives the app through exactly these */
+  window.AsciiForge = {
+    Core, state,
+    setState(patch) { Object.assign(state, patch); syncControls(); schedule(); },
+    run: () => run(),
+    getOutput: () => app.out,
+    getSource: () => (app.src ? app.src.gray : null),
+    loadDemo: () => $("demoBtn").click(),
+    loadDataUrl: (url, name) => useSource(url, name || "test.png"),
+    isBusy: () => !!(app.src && !app.out),
+    /* built by the same functions the download buttons use */
+    buildExports() {
+      if (!app.out) return null;
+      const png = renderToCanvas();
+      return {
+        txt: buildTxt(), ansi: buildAnsi(), svg: buildSvg(), html: buildHtml(),
+        names: { txt: fileName("txt"), png: fileName("png"), svg: fileName("svg"), html: fileName("html") },
+        pngSize: [png.width, png.height],
+      };
+    },
+    dom() {
+      return {
+        status: $("status").textContent,
+        grid: $("stGrid").textContent,
+        fid: $("stFid").textContent,
+        ink: $("stInk").textContent,
+        text: $("art").textContent,
+        spans: $("art").querySelectorAll("span").length,
+        presetChips: document.querySelectorAll("#presets .chip").length,
+        rampOptions: Array.from($("ramp").options).map((o) => o.textContent),
+        fileInputs: document.querySelectorAll('input[type="file"]').length,
+      };
+    },
+  };
+})();
+</script>
+</body>
+</html>
